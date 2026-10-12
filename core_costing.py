@@ -8,6 +8,8 @@ Cost final: fara TVA (recuperabil pt. platitor de TVA) si cash cu TVA (pt. nepla
 import numpy as np
 import pandas as pd
 
+import core_util as util
+
 FX_OK = ("USD", "EUR", "RON")
 
 
@@ -42,9 +44,9 @@ def compute(orders, lines, s):
     l["val_line"] = l["qty"] * l["unit_price"]
     agg = l.groupby("order_id").agg(n_lines=("qty", lambda x: int((x > 0).sum())), qty_tot=("qty", "sum"), w_tot=("w_line", "sum"),
                                     v_tot=("v_line", "sum"), val_tot=("val_line", "sum"))
-    o = o.merge(agg, left_on="id", right_index=True, how="left")
+    j = util.lookup(o["id"], agg)
     for c in agg.columns:
-        o[c] = o[c].fillna(0)
+        o[c] = j[c].fillna(0).values
     usd, eur = o["usd_ron"].fillna(0), o["eur_ron"].fillna(0)
     o["goods_ron"] = o["val_tot"] * fx(o["goods_cur"], usd, eur)
     o["vol_weight"] = np.where(o["volumetric"] == "Da", o["v_tot"] * 1e6 / s["vol_divisor"], 0.0)
@@ -73,8 +75,10 @@ def compute(orders, lines, s):
     o["warnings"] = warn
 
     oc = o.set_index("id")
-    l = l.join(oc[["date", "usd_ron", "eur_ron", "goods_cur", "duty_pct", "vat_pct", "transp_ron", "flat_ron", "logistics_ron", "local_ron",
-                   "method_eff", "alloc_total", "qty_tot", "warnings", "supplier"]].add_prefix("o_"), on="order_id")
+    j = util.lookup(l["order_id"], oc[["date", "usd_ron", "eur_ron", "goods_cur", "duty_pct", "vat_pct", "transp_ron", "flat_ron", "logistics_ron", "local_ron",
+                                       "method_eff", "alloc_total", "qty_tot", "warnings", "supplier"]].add_prefix("o_"))
+    for c in j.columns:
+        l[c] = j[c].values
     l["valid"] = l["o_goods_cur"].isin(FX_OK) & (l["qty"] > 0) & (l["o_usd_ron"] > 0) & (l["o_eur_ron"] > 0)
     l["key"] = np.select([l["o_method_eff"] == "Greutate", l["o_method_eff"] == "Volum (CBM)", l["o_method_eff"] == "Valoare marfa"],
                          [l["w_line"], l["v_line"], l["val_line"]], l["qty"])
@@ -102,7 +106,8 @@ def compute(orders, lines, s):
                                 "Date incomplete (comanda/curs/cantitate)")
 
     tot = l.groupby("order_id")[["total_novat_ron", "total_vat_ron"]].sum()
-    o = o.join(tot, on="id").fillna({"total_novat_ron": 0, "total_vat_ron": 0})
+    j = util.lookup(o["id"], tot)
+    o["total_novat_ron"], o["total_vat_ron"] = j["total_novat_ron"].fillna(0).values, j["total_vat_ron"].fillna(0).values
     o["total_vat_amt"] = o["total_vat_ron"] - o["total_novat_ron"]
     o["total_vat_eur"] = o["total_vat_ron"] / usd_safe(o["eur_ron"])
     o["total_vat_usd"] = o["total_vat_ron"] / usd_safe(o["usd_ron"])

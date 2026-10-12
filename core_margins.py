@@ -2,6 +2,8 @@
 import numpy as np
 import pandas as pd
 
+import core_util as util
+
 
 def sku_key(s):
     """Cheie de potrivire SKU: fara spatii, majuscule (8821-ds == 8821-DS)."""
@@ -34,7 +36,10 @@ def margin_table(catalog, costs, min_margin, settings=None):
     rec, mins = st_.get("returns_recovery", 0.0), st_.get("returns_min_sold", 10)
     c = catalog[catalog["sku"].str.strip() != ""].copy()
     c["_k"] = sku_key(c["sku"])
-    c = c.merge(costs, left_on="_k", right_index=True, how="left").drop(columns="_k")
+    j = util.lookup(c["_k"], costs)
+    for col in costs.columns:
+        c[col] = j[col].values
+    c = c.drop(columns="_k")
     for col in ("qty", "qty_excl"):
         c[col] = c[col].fillna(0)
     sold, ret = c["sold_qty"].fillna(0), c["returned_qty"].fillna(0)
